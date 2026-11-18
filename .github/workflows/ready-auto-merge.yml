@@ -1,0 +1,111 @@
+name: Ready auto-merge
+
+# Reusable: when a pull request from a branch of this repository is marked ready for review, the release GitHub App
+# turns on auto-merge, so it merges once the required `check` is green and every conversation is resolved. A pull
+# request from a fork or with the label `hold` is left for the owner; to stop a pull request after it was marked ready,
+# turn off auto-merge on it.
+# Every run first reads the merge settings and fails on drift, and then nothing is turned on: "Allow auto-merge" on,
+# and the rules of the default branch require a pull request with conversation resolution, the check `check` and,
+# unless `merge-queue` is false, a merge queue. The caller also runs it weekly, so drift shows without a pull request.
+# The App, not GITHUB_TOKEN: a merge by GITHUB_TOKEN starts no workflow on the default branch.
+on:
+  workflow_call:
+    inputs:
+      app-client-id:
+        type: string
+        default: ''
+        description: Client id of the release GitHub App; required on pull request runs (an empty value fails the job).
+      merge-queue:
+        type: boolean
+        default: true
+        description: Require a merge queue on the default branch; false for a repository owned by a user account.
+    secrets:
+      app-private-key:
+        required: false
+
+permissions: {}
+
+jobs:
+  settings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check the merge settings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MERGE_QUEUE: ${{ inputs.merge-queue }}
+          QUERY: >-
+            query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed
+            defaultBranchRef { name } } }
+        run: |
+          set -eu
+          repo=$(gh api graphql -f owner="${REPO%%/*}" -f name="${REPO#*/}" -f query="$QUERY" --jq .data.repository)
+          branch=$(printf '%s' "$repo" | jq -r .defaultBranchRef.name)
+          rules=$(gh api "repos/$REPO/rules/branches/$branch")
+          fail=0
+          has() { printf '%s' "$rules" | jq -e "any(.[]; $1)" > /dev/null; }
+          drift() { echo "::error::$1 (docs/ci-conventions.md, section Ready auto-merge)"; fail=1; }
+          [ "$(printf '%s' "$repo" | jq -r .autoMergeAllowed)" = true ] || drift "Allow auto-merge is off."
+          has '.type == "pull_request" and .parameters.required_review_thread_resolution == true' ||
+            drift "The rules of $branch do not require conversation resolution."
+          has '.type == "required_status_checks" and any(.parameters.required_status_checks[]; .context == "check")' ||
+            drift "The rules of $branch do not require the status check named check."
+          if [ "$MERGE_QUEUE" = true ]; then
+            has '.type == "merge_queue"' || drift "The rules of $branch do not require a merge queue."
+          fi
+          [ "$fail" = 0 ] && echo "Merge settings of $branch match."
+          exit "$fail"
+
+  enable:
+    needs: settings
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && !contains(github.event.pull_request.labels.*.name, 'hold')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require the release App
+        env:
+          CLIENT_ID: ${{ inputs.app-client-id }}
+        run: |
+          [ -n "$CLIENT_ID" ] || { echo "::error::Set the variable RELEASE_APP_CLIENT_ID and the secret RELEASE_APP_PRIVATE_KEY (release GitHub App)."; exit 1; }
+      - id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Turn on auto-merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_ID: ${{ github.event.pull_request.node_id }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          STATE: 'query($id: ID!) { node(id: $id) { ... on PullRequest { mergeStateStatus isMergeQueueEnabled } } }'
+        # Pinned to the head that was marked ready: after a later push GitHub refuses, and the owner decides.
+        # Auto-merge is refused while the pull request can merge at once (clean status), so that case merges or
+        # enqueues directly. With a merge queue the queue sets the merge method; without one it is squash.
+        run: |
+          set -eu
+          for _ in 1 2 3 4 5 6; do
+            pr=$(gh api graphql -f id="$PR_ID" -f query="$STATE" --jq .data.node)
+            state=$(printf '%s' "$pr" | jq -r .mergeStateStatus)
+            [ "$state" = UNKNOWN ] || break
+            sleep 10
+          done
+          queue=$(printf '%s' "$pr" | jq -r .isMergeQueueEnabled)
+          echo "Merge state $state, merge queue $queue"
+          case "$queue/$state" in
+            true/CLEAN) name=enqueuePullRequest method= ;;
+            true/*) name=enablePullRequestAutoMerge method= ;;
+            */CLEAN) name=mergePullRequest method=', mergeMethod: SQUASH' ;;
+            *) name=enablePullRequestAutoMerge method=', mergeMethod: SQUASH' ;;
+          esac
+          echo "Calling $name"
+          gh api graphql -f id="$PR_ID" -f head="$HEAD" -f query="mutation(\$id: ID!, \$head: GitObjectID!) {
+            $name(input: {pullRequestId: \$id, expectedHeadOid: \$head$method}) { clientMutationId } }"

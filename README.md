@@ -8,6 +8,7 @@ Shared GitHub Actions workflows that give a repository its pull-request gates, C
 | `codeql.yml` | CodeQL advanced setup for a JSON list of languages | `security-events: write`, `contents: read`, `actions: read` |
 | `release-weekly.yml` | merges the open release-please pull request with the release GitHub App | `contents: read`, `pull-requests: write`, `actions: write` |
 | `pin-auto-merge.yml` | turns on auto-merge for Dependabot pull requests that change only the pins of this repository | `contents: write`, `pull-requests: write` |
+| `ready-auto-merge.yml` | turns on auto-merge with the release GitHub App when a pull request is marked ready, and fails when the merge settings drift | `contents: read` |
 
 ## Use
 
