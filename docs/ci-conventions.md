@@ -54,7 +54,8 @@ The rules a repository follows when it calls the workflows of `ESchuderer/reusab
 
 | Input | Default | Use |
 |---|---|---|
-| `license-allow-list` | `MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, CC0-1.0, Unlicense, MPL-2.0, LGPL-2.1-or-later, LGPL-3.0-or-later` | SPDX ids a new dependency may carry. A repository adds GPL or AGPL only on purpose, by passing the full list with them added. |
+| `license-allow-list` | `MIT, MIT-0, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC0-1.0, Unlicense, Python-2.0, MPL-2.0, LGPL-2.1-or-later, LGPL-3.0-or-later` | SPDX ids a new dependency may carry. A repository adds GPL or AGPL only on purpose, by passing the full list with them added. CC-BY-4.0 is allowed only per package, for third-party data, through `license-allow-packages`. |
+| `license-allow-packages` | empty | comma-separated package URLs ([purl](https://github.com/package-url/purl-spec)) whose license dependency review skips, passed to `allow-dependencies-licenses` of [dependency-review-action](https://github.com/actions/dependency-review-action#configuration-options); for example `pkg:npm/caniuse-lite` |
 | `fail-on-severity` | `high` | lowest vulnerability severity that fails dependency review |
 | `pr-title-types` | `feat fix perf refactor docs test build ci chore revert style`, one per line | Conventional Commits types a title may use |
 | `typos-config` | empty | path to a typos config; empty lets typos find `_typos.toml` |
