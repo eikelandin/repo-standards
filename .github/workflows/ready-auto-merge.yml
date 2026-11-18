@@ -44,7 +44,7 @@ jobs:
           set -eu
           repo=$(gh api graphql -f owner="${REPO%%/*}" -f name="${REPO#*/}" -f query="$QUERY" --jq .data.repository)
           branch=$(printf '%s' "$repo" | jq -r .defaultBranchRef.name)
-          rules=$(gh api "repos/$REPO/rules/branches/$branch")
+          rules=$(gh api --paginate --slurp "repos/$REPO/rules/branches/$branch" | jq add)
           fail=0
           has() { printf '%s' "$rules" | jq -e "any(.[]; $1)" > /dev/null; }
           drift() { echo "::error::$1 (docs/ci-conventions.md, section Ready auto-merge)"; fail=1; }
@@ -64,6 +64,8 @@ jobs:
     if: >-
       github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
       && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.base.ref == github.event.repository.default_branch
+      && !github.event.repository.private
       && !contains(github.event.pull_request.labels.*.name, 'hold')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -87,9 +89,10 @@ jobs:
           PR_ID: ${{ github.event.pull_request.node_id }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           STATE: 'query($id: ID!) { node(id: $id) { ... on PullRequest { mergeStateStatus isMergeQueueEnabled } } }'
-        # Pinned to the head that was marked ready: after a later push GitHub refuses, and the owner decides.
-        # Auto-merge is refused while the pull request can merge at once (clean status), so that case merges or
-        # enqueues directly. With a merge queue the queue sets the merge method; without one it is squash.
+        # expectedHeadOid is compared once, when the mutation runs: a push after the ready mark and before this job
+        # makes GitHub refuse, and the owner decides. Auto-merge is refused while the required checks already pass
+        # (clean, unstable or has-hooks status; this job's own run counts as a pending check), so those states merge
+        # or enqueue directly. With a merge queue the queue sets the merge method; without one it is squash.
         run: |
           set -eu
           for _ in 1 2 3 4 5 6; do
@@ -101,9 +104,9 @@ jobs:
           queue=$(printf '%s' "$pr" | jq -r .isMergeQueueEnabled)
           echo "Merge state $state, merge queue $queue"
           case "$queue/$state" in
-            true/CLEAN) name=enqueuePullRequest method= ;;
+            true/CLEAN | true/UNSTABLE | true/HAS_HOOKS) name=enqueuePullRequest method= ;;
             true/*) name=enablePullRequestAutoMerge method= ;;
-            */CLEAN) name=mergePullRequest method=', mergeMethod: SQUASH' ;;
+            */CLEAN | */UNSTABLE | */HAS_HOOKS) name=mergePullRequest method=', mergeMethod: SQUASH' ;;
             *) name=enablePullRequestAutoMerge method=', mergeMethod: SQUASH' ;;
           esac
           echo "Calling $name"
