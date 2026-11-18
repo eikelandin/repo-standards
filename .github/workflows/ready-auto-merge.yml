@@ -41,7 +41,7 @@ jobs:
             query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { autoMergeAllowed
             defaultBranchRef { name } } }
         run: |
-          set -eu
+          set -euo pipefail
           repo=$(gh api graphql -f owner="${REPO%%/*}" -f name="${REPO#*/}" -f query="$QUERY" --jq .data.repository)
           branch=$(printf '%s' "$repo" | jq -r .defaultBranchRef.name)
           rules=$(gh api --paginate --slurp "repos/$REPO/rules/branches/$branch" | jq add)
@@ -65,7 +65,7 @@ jobs:
       github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
       && github.event.pull_request.head.repo.full_name == github.repository
       && github.event.pull_request.base.ref == github.event.repository.default_branch
-      && !github.event.repository.private
+      && github.event.repository.private == false
       && !contains(github.event.pull_request.labels.*.name, 'hold')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -86,15 +86,24 @@ jobs:
       - name: Turn on auto-merge
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          SENDER: ${{ github.event.sender.login }}
           PR_ID: ${{ github.event.pull_request.node_id }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           STATE: 'query($id: ID!) { node(id: $id) { ... on PullRequest { mergeStateStatus isMergeQueueEnabled } } }'
         # expectedHeadOid is compared once, when the mutation runs: a push after the ready mark and before this job
         # makes GitHub refuse, and the owner decides. Auto-merge is refused while the required checks already pass
-        # (clean, unstable or has-hooks status; this job's own run counts as a pending check), so those states merge
-        # or enqueue directly. With a merge queue the queue sets the merge method; without one it is squash.
+        # (clean, unstable or has-hooks status; this job's own run counts as a pending check), so without a merge queue
+        # those states merge directly (squash). With a merge queue auto-merge adds it to the queue in every state, and
+        # the queue sets the merge method.
         run: |
           set -eu
+          # maintain reads as write, triage as read
+          access=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission)
+          case "$access" in
+            admin | write) ;;
+            *) echo "::error::$SENDER marked the pull request ready with $access access; write access is required."; exit 1 ;;
+          esac
           for _ in 1 2 3 4 5 6; do
             pr=$(gh api graphql -f id="$PR_ID" -f query="$STATE" --jq .data.node)
             state=$(printf '%s' "$pr" | jq -r .mergeStateStatus)
@@ -104,7 +113,6 @@ jobs:
           queue=$(printf '%s' "$pr" | jq -r .isMergeQueueEnabled)
           echo "Merge state $state, merge queue $queue"
           case "$queue/$state" in
-            true/CLEAN | true/UNSTABLE | true/HAS_HOOKS) name=enqueuePullRequest method= ;;
             true/*) name=enablePullRequestAutoMerge method= ;;
             */CLEAN | */UNSTABLE | */HAS_HOOKS) name=mergePullRequest method=', mergeMethod: SQUASH' ;;
             *) name=enablePullRequestAutoMerge method=', mergeMethod: SQUASH' ;;

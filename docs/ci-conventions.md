@@ -81,18 +81,20 @@ A repository with compiled code calls `codeql.yml` twice: once with `build-mode:
 
 ## Ready auto-merge
 
-`ready-auto-merge.yml` merges a pull request once it is marked ready for review, `check` is green and every conversation is resolved. The release GitHub App turns on auto-merge, so the merge is expected to start the push workflows on the default branch (not yet observed: the App token enabling auto-merge, merging and enqueueing).
+`ready-auto-merge.yml` merges a pull request once it is marked ready for review, `check` is green and every conversation is resolved. The release GitHub App turns on auto-merge, so the merge is expected to start the push workflows on the default branch (not yet observed: the App token enabling auto-merge and merging).
 
 - It acts only on the event `ready_for_review`. A pull request opened as ready is not enrolled; convert it to draft and mark it ready again.
 - It acts only in a public repository and only on a pull request into the default branch, the branch whose settings it checks.
+- It fails when the account that marked the pull request ready has less than write access.
 - It skips a pull request from a fork and one with the label `hold` at the moment it is marked ready; a re-run reads the same moment. To stop a pull request later, turn off auto-merge on it.
 - It pins the head that was marked ready (`expectedHeadOid`): a push between marking ready and the job makes GitHub refuse, and the pull request waits for the owner. Pushes after auto-merge is on keep it on.
-- GitHub refuses auto-merge while the required checks already pass (clean or unstable status, observed in #26; the job's own run counts as a pending check). In the states clean, unstable and has-hooks the job merges it (squash) or, with a merge queue, adds it to the queue, both pinned to the same head. A failing check that is not required does not hold that merge, as it would not hold auto-merge.
-- A pull request with a merge conflict, or whose state changes between the job's query and its mutation, fails the job and waits for the owner.
+- GitHub refuses auto-merge while the required checks already pass (clean or unstable status, observed in #26; the job's own run counts as a pending check). Without a merge queue, in the states clean, unstable and has-hooks the job merges it (squash), pinned to the same head. A failing check that is not required does not hold that merge, as it would not hold auto-merge. With a merge queue the job turns on auto-merge in every state, which adds the pull request to the queue.
+- GitHub starts no pull request run while there is a merge conflict, so marking such a pull request ready does nothing. Resolve the conflict, convert it to draft and mark it ready again.
+- A pull request whose state changes between the job's query and its mutation fails the job and waits for the owner.
 - Auto-merge waits only for what the rules require. A review bot comment that arrives after `check` is green and the conversations are resolved does not hold the merge.
 - Every run first checks the merge settings below and turns nothing on when one drifts; the template also runs it every Monday and by hand, so drift shows as a failed run.
 
-Merge settings, set by the owner once per repository, by hand until `ESchuderer/iac` sets them (the job token cannot change settings or rulesets):
+Merge settings, set by the owner once per repository, by hand until infrastructure code sets them (the job token cannot change settings or rulesets):
 
 1. "Allow auto-merge" on: `gh api -X PATCH repos/<owner>/<repo> -F allow_auto_merge=true`.
 2. In the ruleset of the default branch: "Require a pull request before merging" with "Require conversation resolution before merging"; "Require status checks to pass" with `check` (source GitHub Actions); "Require merge queue" with the merge method squash. GitHub offers the merge queue only in a public repository owned by an organization; a repository owned by a user account leaves it out and calls the workflow with `merge-queue: false`.
