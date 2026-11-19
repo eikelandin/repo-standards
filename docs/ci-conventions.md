@@ -86,6 +86,7 @@ A repository with compiled code calls `codeql.yml` twice: once with `build-mode:
 - It acts only on the event `ready_for_review`. A pull request opened as ready is not enrolled; convert it to draft and mark it ready again.
 - It acts only in a public repository and only on a pull request into the default branch, the branch whose settings it checks.
 - It fails when the account that marked the pull request ready has less than write access.
+- It never merges a release pull request: it skips one with the label `autorelease: pending`, which the owner merges by hand.
 - It skips a pull request from a fork and one with the label `hold` at the moment it is marked ready; a re-run reads the same moment. To stop a pull request later, turn off auto-merge on it.
 - It pins the head that was marked ready (`expectedHeadOid`): a push between marking ready and the job makes GitHub refuse, and the pull request waits for the owner. Pushes after auto-merge is on keep it on.
 - GitHub refuses auto-merge while the required checks already pass (clean or unstable status, observed in #26; the job's own run counts as a pending check). Without a merge queue, in the states clean, unstable and has-hooks the job merges it (squash), pinned to the same head. A failing check that is not required does not hold that merge, as it would not hold auto-merge. With a merge queue the job turns on auto-merge in every state, which adds the pull request to the queue.
