@@ -77,6 +77,31 @@ A repository with compiled code calls `codeql.yml` twice: once with `build-mode:
 
 `pin-auto-merge.yml`: no inputs.
 
+`ready-auto-merge.yml`: input `app-client-id` (empty fails a pull request run), input `merge-queue` (default `true`; `false` for a repository owned by a user account), secret `app-private-key`.
+
+## Ready auto-merge
+
+`ready-auto-merge.yml` merges a pull request once it is marked ready for review, `check` is green and every conversation is resolved. The release GitHub App turns on auto-merge, so the merge is expected to start the push workflows on the default branch (not yet observed: the App token enabling auto-merge and merging).
+
+- It acts only on the event `ready_for_review`. A pull request opened as ready is not enrolled; convert it to draft and mark it ready again.
+- It acts only in a public repository and only on a pull request into the default branch, the branch whose settings it checks.
+- It fails when the account that marked the pull request ready has less than write access.
+- It skips a pull request from a fork and one with the label `hold` at the moment it is marked ready; a re-run reads the same moment. To stop a pull request later, turn off auto-merge on it.
+- It pins the head that was marked ready (`expectedHeadOid`): a push between marking ready and the job makes GitHub refuse, and the pull request waits for the owner. Pushes after auto-merge is on keep it on.
+- GitHub refuses auto-merge while the required checks already pass (clean or unstable status, observed in #26; the job's own run counts as a pending check). Without a merge queue, in the states clean, unstable and has-hooks the job merges it (squash), pinned to the same head. A failing check that is not required does not hold that merge, as it would not hold auto-merge. With a merge queue the job turns on auto-merge in every state, which adds the pull request to the queue.
+- GitHub starts no pull request run while there is a merge conflict, so marking such a pull request ready does nothing. Resolve the conflict, convert it to draft and mark it ready again.
+- A pull request whose state changes between the job's query and its mutation fails the job and waits for the owner.
+- Auto-merge waits only for what the rules require. A review bot comment that arrives after `check` is green and the conversations are resolved does not hold the merge.
+- Every run first checks the merge settings below and turns nothing on when one drifts; the template also runs it every Monday and by hand, so drift shows as a failed run.
+
+Merge settings, set by the owner once per repository, by hand until infrastructure code sets them (the job token cannot change settings or rulesets):
+
+1. "Allow auto-merge" on: `gh api -X PATCH repos/<owner>/<repo> -F allow_auto_merge=true`.
+2. In the ruleset of the default branch: "Require a pull request before merging" with "Require conversation resolution before merging"; "Require status checks to pass" with `check` (source GitHub Actions); "Require merge queue" with the merge method squash. GitHub offers the merge queue only in a public repository owned by an organization; a repository owned by a user account leaves it out and calls the workflow with `merge-queue: false`.
+3. The release App installed, with the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY` (Checklist, step 4).
+4. Once the template is copied, read back: `gh workflow run ready-auto-merge.yml -R <owner>/<repo>`; the job `settings` passes or names each drift.
+
+
 ## Allowlist
 
 An owner or repository with the Actions policy `selected` and SHA pinning required allows GitHub-owned actions and names:
@@ -92,16 +117,16 @@ An owner or repository with the Actions policy `selected` and SHA pinning requir
    - private vulnerability reporting on: `gh api -X PUT repos/<owner>/<repo>/private-vulnerability-reporting`, check with `gh api repos/<owner>/<repo>/private-vulnerability-reporting`
    - immutable releases on: `gh api -X PUT repos/<owner>/<repo>/immutable-releases`, check with `gh api repos/<owner>/<repo>/immutable-releases`
    - CodeQL default setup off: `gh api -X PATCH repos/<owner>/<repo>/code-scanning/default-setup -f state=not-configured`, check with `gh api repos/<owner>/<repo>/code-scanning/default-setup --jq .state`
-3. Copy the templates, except `pin-auto-merge.yml`, and set the release SHA (section Pins and versions). Add `_typos.toml` with `[default] locale = "en-us"` for US spelling.
+3. Copy the templates, except `pin-auto-merge.yml` and `ready-auto-merge.yml`, and set the release SHA (section Pins and versions). Add `_typos.toml` with `[default] locale = "en-us"` for US spelling.
 4. A repository that releases: set the variable `RELEASE_APP_CLIENT_ID` and the secret `RELEASE_APP_PRIVATE_KEY` of its owner's release GitHub App, and add `release-please-config.json` and `.release-please-manifest.json`.
-5. Open the first pull request. Once `check` has reported, the ruleset that requires it is applied (step 1 again if it was held back). Then copy `pin-auto-merge.yml`.
+5. Open the first pull request. Once `check` has reported, the ruleset that requires it is applied (step 1 again if it was held back). Then copy `pin-auto-merge.yml`, set the merge settings (section Ready auto-merge) and copy `ready-auto-merge.yml`.
 
 ## Private repositories
 
 Private repositories are set by hand from the same checklist and are never named in `ESchuderer/iac`. On GitHub Free a private repository has no rulesets, so CI reports and cannot block a merge, and CodeQL, dependency review and secret scanning do not run. A private repository differs from the templates in two places:
 
 - `ci.yml` calls `gates.yml` with `dependency-review: false` and has no `codeql` job: without GitHub Code Security, dependency review fails its job and the CodeQL upload fails, so `check` would stay red.
-- No `pin-auto-merge.yml`: without a ruleset there is no required check for auto-merge to wait for.
+- No `pin-auto-merge.yml` or `ready-auto-merge.yml`: without a ruleset there is no required check for auto-merge to wait for.
 
 Each private repository writes this deviation down with its substitute gates:
 
