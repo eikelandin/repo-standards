@@ -1,10 +1,10 @@
 name: Ready auto-merge
 
 # Copy to .github/workflows/ready-auto-merge.yml. A pull request from a branch of this repository merges once it is
-# marked ready, `check` is green and every conversation is resolved; the label `hold` keeps it for the owner. Needs the
-# merge settings of docs/ci-conventions.md (section Ready auto-merge), checked on every run and weekly, and the release
-# App (variable RELEASE_APP_CLIENT_ID, secret RELEASE_APP_PRIVATE_KEY). A repository owned by a user account has no
-# merge queue and adds `with: merge-queue: false`.
+# marked ready, `check` is green and every conversation is resolved; release pull requests and the label `hold` stay
+# with the owner. Needs the merge settings of docs/ci-conventions.md (section Ready auto-merge), checked on every run
+# and weekly, and the release App (variable RELEASE_APP_CLIENT_ID, secret RELEASE_APP_PRIVATE_KEY). A repository owned
+# by a user account has no merge queue and adds `with: merge-queue: false`.
 on:
   pull_request:
     types: [ready_for_review]

@@ -2,8 +2,8 @@ name: Ready auto-merge
 
 # Reusable: when a pull request from a branch of this repository is marked ready for review, the release GitHub App
 # turns on auto-merge, so it merges once the required `check` is green and every conversation is resolved. A pull
-# request from a fork or with the label `hold` is left for the owner; to stop a pull request after it was marked ready,
-# turn off auto-merge on it.
+# request from a fork, a release pull request or one with the label `hold` is left for the owner; to stop a pull
+# request after it was marked ready, turn off auto-merge on it.
 # Every run first reads the merge settings and fails on drift, and then nothing is turned on: "Allow auto-merge" on,
 # and the rules of the default branch require a pull request with conversation resolution, the check `check` and,
 # unless `merge-queue` is false, a merge queue. The caller also runs it weekly, so drift shows without a pull request.
@@ -67,6 +67,7 @@ jobs:
       && github.event.pull_request.base.ref == github.event.repository.default_branch
       && github.event.repository.private == false
       && !contains(github.event.pull_request.labels.*.name, 'hold')
+      && !startsWith(github.event.pull_request.head.ref, 'release-please--')
       && !contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
     runs-on: ubuntu-latest
     timeout-minutes: 5
